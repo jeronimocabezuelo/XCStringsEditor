@@ -40,7 +40,121 @@ struct Filter {
 
 @Observable
 class AppModel {
+    var currentLanguage: Language = .english {
+        didSet {
+            selected.removeAll()
+            
+            for doc in documents {
+                doc.currentLanguage = currentLanguage
+            }
+        }
+    }
+    var documents: [DocumentModel] = []
+    var selected = Set<LocalizeItem.ID>()
+    var editingID: String?
+    var sortOrder: [KeyPathComparator<LocalizeItem>] = [
+        .init(\.state, order: SortOrder.forward),
+        .init(\.key, order: SortOrder.forward)
+    ]
+    
+    var forceClose: Bool = false
+    var canClose: Bool { documents.allSatisfy(\.canClose) || forceClose}
+    var isModified: Bool { documents.map(\.isModified).contains(true) }
+    var isLoading: Bool { documents.map(\.isLoading).contains(true) }
+    var languages: [Language] {
+        documents
+            .map(\.languages)
+            .reduce(into: Set<Language>()) { result, languages in
+                result = result.union(languages)
+            }
+            .map(\.self)
+    }
+    
+    var localizeItems: [LocalizeItem] {
+        documents.flatMap(\.localizeItems)
+    }
+    
+    var filter: Filter = Filter() {
+        didSet {
+            for document in documents {
+                document.localizeItems = document.filteredItems()
+            }
+        }
+    }
+    var searchText: String = "" {
+        didSet {
+            for document in documents {
+                document.localizeItems = document.filteredItems()
+            }
+        }
+    }
+    
+    var showAPIKeyAlert: Bool = false
+    
+    var staleItemsHidden: Bool = false {
+        didSet {
+            UserDefaults.standard.set(staleItemsHidden, forKey: "StaleItemsHidden")
+            for document in documents {
+                document.localizeItems = document.filteredItems()
+            }
+        }
+    }
+    
+    var dontTranslateItemsHidden: Bool = false {
+        didSet {
+            UserDefaults.standard.set(dontTranslateItemsHidden, forKey: "DontTranslateItemsHidden")
+            for document in documents {
+                document.localizeItems = document.filteredItems()
+            }
+        }
+    }
+    
+    var translateLaterItemsHidden: Bool = false {
+        didSet {
+            UserDefaults.standard.set(translateLaterItemsHidden, forKey: "TranslateLaterItemsHidden")
+            for document in documents {
+                document.localizeItems = document.filteredItems()
+            }
+        }
+    }
+    
+    
+    
+    func load(file: URL) {
+        let document = DocumentModel(appModel: self)
+        document.load(file: file)
+        document.currentLanguage = currentLanguage
+        
+        documents.append(document)
+    }
+    
+    func item(with id: LocalizeItem.ID) -> LocalizeItem? {
+        for document in documents {
+            if let item = document.item(with: id) {
+                return item
+            }
+        }
+        
+        return nil
+    }
+    
+    func sort(using comparator: [KeyPathComparator<LocalizeItem>]) {
+        for document in documents {
+            document.sort(using: comparator)
+        }
+    }
+    
+    init() {
+        staleItemsHidden = UserDefaults.standard.bool(forKey: "StaleItemsHidden")
+        translateLaterItemsHidden = UserDefaults.standard.bool(forKey: "TranslateLaterItemsHidden")
+        dontTranslateItemsHidden = UserDefaults.standard.bool(forKey: "DontTranslateItemsHidden")
+    }
+}
 
+@Observable
+class DocumentModel: Identifiable {
+    private let appModel: AppModel
+    
     private(set) var fileURL: URL?
     private(set) var title: String?
 
@@ -49,12 +163,10 @@ class AppModel {
 
     @ObservationIgnored
     private(set) var allLocalizeItems: [LocalizeItem] = []
-    private(set) var localizeItems: [LocalizeItem] = []
+    var localizeItems: [LocalizeItem] = []
     var baseLanguage: Language = .english
     var currentLanguage: Language = .english {
         didSet {
-            selected.removeAll()
-            
             reloadData()
             
             settings.lastLanguage = currentLanguage.code
@@ -63,60 +175,27 @@ class AppModel {
             }
         }
     }
-    var editingID: String?
-    var sortOrder: [KeyPathComparator<LocalizeItem>] = [
-        .init(\.state, order: SortOrder.forward),
-        .init(\.key, order: SortOrder.forward)
-    ]
-    var searchText: String = "" {
-        didSet {
-            // TODO: debounce
-            localizeItems = filteredItems()
-        }
-    }
+    
+    var sortOrder: [KeyPathComparator<LocalizeItem>] { appModel.sortOrder }
+    var searchText: String { appModel.searchText }
     var isModified: Bool = false
-    var forceClose: Bool = false
-    var canClose: Bool { forceClose || isModified == false }
+    var canClose: Bool { isModified == false }
 
     var openingFileURL: URL?
     
 //    private var debouncedSearchText: String = ""
 //    private var cancellables = Set<AnyCancellable>()
-    var filter: Filter = Filter() {
-        didSet {
-            localizeItems = filteredItems()
-        }
+    var filter: Filter {
+        appModel.filter
     }
-    var translateLaterItemsHidden: Bool = false {
-        didSet {
-            UserDefaults.standard.set(translateLaterItemsHidden, forKey: "TranslateLaterItemsHidden")
-            localizeItems = filteredItems()
-        }
-    }
-    var staleItemsHidden: Bool = false {
-        didSet {
-            UserDefaults.standard.set(staleItemsHidden, forKey: "StaleItemsHidden")
-            localizeItems = filteredItems()
-        }
-    }
-    var dontTranslateItemsHidden: Bool = false {
-        didSet {
-            UserDefaults.standard.set(dontTranslateItemsHidden, forKey: "DontTranslateItemsHidden")
-            localizeItems = filteredItems()
-        }
-    }
-
-    var selected = Set<LocalizeItem.ID>()
     
     var settings: FileSettings!
     
-    var showAPIKeyAlert: Bool = false
     var isLoading: Bool = false
     var translator = TranslatorFactory.translator
-    init() {
-        translateLaterItemsHidden = UserDefaults.standard.bool(forKey: "TranslateLaterItemsHidden")
-        staleItemsHidden = UserDefaults.standard.bool(forKey: "StaleItemsHidden")
-        dontTranslateItemsHidden = UserDefaults.standard.bool(forKey: "DontTranslateItemsHidden")
+    init(appModel: AppModel) {
+        self.appModel = appModel
+        
         
 //        searchText.publisher
 //            .debounce(for: 0.2, scheduler: RunLoop.main)
@@ -344,7 +423,7 @@ class AppModel {
         allLocalizeItems = allItems
     }
 
-    private func filteredItems() -> [LocalizeItem] {
+    func filteredItems() -> [LocalizeItem] {
         // TODO: filter sub items
 
         if isModified {
@@ -356,13 +435,13 @@ class AppModel {
                 return false
             }
             
-            if dontTranslateItemsHidden == true && $0.shouldTranslate == false {
+            if appModel.dontTranslateItemsHidden == true && $0.shouldTranslate == false {
                 return false
             }
-            if translateLaterItemsHidden == true && $0.translateLater {
+            if appModel.translateLaterItemsHidden == true && $0.translateLater {
                 return false
             }
-            if staleItemsHidden == true && $0.isStale {
+            if appModel.staleItemsHidden == true && $0.isStale {
                 return false
             }
             
@@ -821,7 +900,7 @@ class AppModel {
     }
 
     func clearTranslation(ids: Set<LocalizeItem.ID>? = nil) {
-        let itemIDs = ids ?? self.selected
+        let itemIDs = ids ?? self.appModel.selected
         
         for itemID in itemIDs {
             updateItem(with: itemID) { item in
@@ -852,7 +931,7 @@ class AppModel {
         }
 
         isLoading = true
-        let itemIDs = ids ?? self.selected
+        let itemIDs = ids ?? self.appModel.selected
 
         // TODO: Allow sending multiple translation requests simultaneously
         for itemID in itemIDs {
@@ -874,7 +953,7 @@ class AppModel {
                 } catch {
                     // Handle errors during translation
                     if error as? TranslatorError == TranslatorError.invalidAPI {
-                        self.showAPIKeyAlert = true // Notify the user to check API key
+                        self.appModel.showAPIKeyAlert = true // Notify the user to check API key
                     } else {
                         logger.error("Failed to translate. \(error)")
                     }
@@ -886,7 +965,7 @@ class AppModel {
     
     func reverseTranslate(ids: Set<LocalizeItem.ID>? = nil) async {
         isLoading = true
-        let itemIDs = ids ?? self.selected
+        let itemIDs = ids ?? self.appModel.selected
 
         // TODO: Allow sending multiple translation requests simultaneously
         for itemID in itemIDs {
@@ -902,7 +981,7 @@ class AppModel {
                 }
                 catch {
                     if error as? TranslatorError == TranslatorError.invalidAPI {
-                        showAPIKeyAlert = true
+                        appModel.showAPIKeyAlert = true
                     } else {
                         logger.error("Failed to reverse translation. \(error)")
                     }
@@ -913,7 +992,7 @@ class AppModel {
     }
 
     func markNeedsReview(ids: Set<LocalizeItem.ID>? = nil) {
-        let itemIDs = ids ?? self.selected
+        let itemIDs = ids ?? self.appModel.selected
         
         for itemID in itemIDs {
             updateItem(with: itemID) { item in
@@ -927,7 +1006,7 @@ class AppModel {
 
     func setShouldTranslate(_ shouldTranslate: Bool, for ids: Set<LocalizeItem.ID>? = nil) {
         var updatedIDs = [LocalizeItem.ID]()
-        let itemIDs = ids ?? self.selected
+        let itemIDs = ids ?? self.appModel.selected
         
         for itemID in itemIDs {
             updateItem(with: itemID) { item in
@@ -963,7 +1042,7 @@ class AppModel {
     }
 
     func reviewed(ids: Set<LocalizeItem.ID>? = nil) {
-        let itemIDs = ids ?? self.selected
+        let itemIDs = ids ?? self.appModel.selected
         
         for itemID in itemIDs {
             updateItem(with: itemID) { item in
@@ -979,7 +1058,7 @@ class AppModel {
     ///
     /// Mark can be done only to root items
     func markTranslateLater(ids: Set<LocalizeItem.ID>? = nil, value: Bool = true) {
-        let itemIDs = ids ?? self.selected
+        let itemIDs = ids ?? self.appModel.selected
         
         for itemID in itemIDs {
             updateItem(with: itemID) { item in
@@ -1028,7 +1107,7 @@ class AppModel {
     /// Mark can be done only to root items
     func markNeedsWork(ids: Set<LocalizeItem.ID>? = nil, value: Bool = true, allLanguages: Bool = false) {
         var updatedIDs = [LocalizeItem.ID]()
-        let itemIDs = ids ?? self.selected
+        let itemIDs = ids ?? self.appModel.selected
         
         for itemID in itemIDs {
             updateItem(with: itemID) { item in
@@ -1152,7 +1231,7 @@ class AppModel {
 
     
     func copyFromSourceText(ids: Set<LocalizeItem.ID>? = nil) {
-        let itemIDs = ids ?? self.selected
+        let itemIDs = ids ?? self.appModel.selected
         
         for itemID in itemIDs {
             guard let item = item(with: itemID) else {
@@ -1164,7 +1243,7 @@ class AppModel {
     
     func copySourceText(ids: Set<LocalizeItem.ID>? = nil) {
         var lines = [String]()
-        let itemIDs = ids ?? self.selected
+        let itemIDs = ids ?? self.appModel.selected
         
         for itemID in itemIDs {
             guard let item = item(with: itemID) else {
@@ -1174,13 +1253,16 @@ class AppModel {
                 lines.append(item.sourceString)
             }
         }
+        
+        guard lines.isEmpty == false else { return }
+        
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
     }
     
     func copyTranslationText(ids: Set<LocalizeItem.ID>? = nil) {
         var lines = [String]()
-        let itemIDs = ids ?? self.selected
+        let itemIDs = ids ?? self.appModel.selected
         
         for itemID in itemIDs {
             guard let item = item(with: itemID) else {
@@ -1190,13 +1272,16 @@ class AppModel {
                 lines.append(translation)
             }
         }
+        
+        guard lines.isEmpty == false else { return }
+        
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
     }
 
     func copySourceAndTranslationText(ids: Set<LocalizeItem.ID>? = nil) {
         var lines = [String]()
-        let itemIDs = ids ?? self.selected
+        let itemIDs = ids ?? self.appModel.selected
         
         for itemID in itemIDs {
             guard let item = item(with: itemID) else {
@@ -1204,6 +1289,9 @@ class AppModel {
             }
             lines.append("\(item.sourceString) = \(item.translation ?? "")")
         }
+        
+        guard lines.isEmpty == false else { return }
+        
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
     }

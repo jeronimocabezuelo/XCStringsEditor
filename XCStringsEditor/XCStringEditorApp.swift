@@ -28,31 +28,38 @@ struct XCStringEditorApp: App {
                 .environment(appModel)
                 .environment(appDelegate.windowDelegate)
                 .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { newValue in
-                    if let url = appModel.settingsFileURL {
-                        appModel.settings.save(to: url)
+                    for document in appModel.documents {
+                        if let url = document.settingsFileURL {
+                            document.settings.save(to: url)
+                        }
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .receivedOpenURLsNotification), perform: { newValue in
-                    guard let urls = newValue.userInfo?["urls"] as? [URL], let url = urls.first else {
+                    guard let urls = newValue.userInfo?["urls"] as? [URL] else {
                         return
                     }
-                    
-                    openURL(url)
+                    for url in urls {
+                        openURL(url)
+                    }
                 })
                 .confirmationDialog("Unsaved Changes Detected", isPresented: $isDiscardConfirmVisible) {
                     Button("Save and Open", role: .none) {
-                        guard let url = appModel.openingFileURL else {
-                            return
+                        for document in appModel.documents {
+                            guard let url = document.openingFileURL else {
+                                return
+                            }
+                            document.save()
+                            document.load(file: url)
                         }
-                        appModel.save()
-                        appModel.load(file: url)
                     }
                     
                     Button("Discard and Open", role: .destructive) {
-                        guard let url = appModel.openingFileURL else {
-                            return
+                        for document in appModel.documents {
+                            guard let url = document.openingFileURL else {
+                                return
+                            }
+                            document.load(file: url)
                         }
-                        appModel.load(file: url)
                     }
                     
                     Button("Cancel", role: .cancel) {
@@ -100,26 +107,34 @@ struct XCStringEditorApp: App {
                 Divider()
                 
                 Button("Save") {
-                    appModel.save()
+                    for document in appModel.documents {
+                        document.save()
+                    }
                 }
                 .keyboardShortcut("s", modifiers: [.command]) // Cmd + S
-                .disabled(appModel.fileURL == nil)
+//                .disabled(appModel.fileURL == nil)
             }
             CommandGroup(after: .pasteboard) {
                 Button("Copy Source Text") {
-                    appModel.copySourceText()
+                    for document in appModel.documents {
+                        document.copySourceText()
+                    }
                 }
                 .keyboardShortcut("c", modifiers: [.command, .control]) // Cmd + Control + C
                 .disabled(appModel.selected.isEmpty)
                 
                 Button("Copy Translation") {
-                    appModel.copyTranslationText()
+                    for document in appModel.documents {
+                        document.copyTranslationText()
+                    }
                 }
                 .keyboardShortcut("c", modifiers: [.command, .option]) // Cmd + Option + C
                 .disabled(appModel.selected.isEmpty)
 
                 Button("Copy Source and Translation Text") {
-                    appModel.copySourceAndTranslationText()
+                    for document in appModel.documents {
+                        document.copySourceAndTranslationText()
+                    }
                 }
                 .keyboardShortcut("c", modifiers: [.command, .option, .control]) // Cmd + Option + Control + C
                 .disabled(appModel.selected.isEmpty)
@@ -127,13 +142,17 @@ struct XCStringEditorApp: App {
                 Divider() // ------------------------
                 
                 Button("Clear Translation") {
-                    appModel.clearTranslation()
+                    for document in appModel.documents {
+                        document.clearTranslation()
+                    }
                 }
                 .keyboardShortcut("e", modifiers: [.command]) // Cmd + E
                 .disabled(appModel.selected.isEmpty)
                 
                 Button("Copy from Source Text") {
-                    appModel.copyFromSourceText()
+                    for document in appModel.documents {
+                        document.copyFromSourceText()
+                    }
                 }
                 .keyboardShortcut("d", modifiers: [.command]) // Cmd + D
                 .disabled(appModel.selected.isEmpty)
@@ -141,21 +160,29 @@ struct XCStringEditorApp: App {
                 Divider() // ------------------------
                 
                 Button("Mark for Review") {
-                    appModel.markNeedsReview()
+                    for document in appModel.documents {
+                        document.markNeedsReview()
+                    }
                 }
                 .disabled(appModel.selected.isEmpty)
                 Button("Mark as Reviewed") {
-                    appModel.reviewed()
+                    for document in appModel.documents {
+                        document.reviewed()
+                    }
                 }
                 .disabled(appModel.selected.isEmpty)
 
-                if appModel.selected.isEmpty == false && appModel.items(with: Array(appModel.selected)).allSatisfy({ $0.shouldTranslate == false }) {
+                if appModel.selected.isEmpty == false && appModel.documents.flatMap({ $0.items(with: Array(appModel.selected))}).allSatisfy({ $0.shouldTranslate == false }) {
                     Button("Mark for Translation") {
-                        appModel.setShouldTranslate(true)
+                        for document in appModel.documents {
+                            document.setShouldTranslate(true)
+                        }
                     }
                 } else {
                     Button("Mark as \"Don't Translate\"") {
-                        appModel.setShouldTranslate(false)
+                        for document in appModel.documents {
+                            document.setShouldTranslate(false)
+                        }
                     }
                     .disabled(appModel.selected.isEmpty)
                 }
@@ -163,35 +190,47 @@ struct XCStringEditorApp: App {
                 Divider()
                 
                 Button("Mark for Translate Later") {
-                    appModel.markTranslateLater(value: true)
+                    for document in appModel.documents {
+                        document.markTranslateLater(value: true)
+                    }
                 }
                 .keyboardShortcut("l", modifiers: [.command]) // Cmd + L
                 .disabled(appModel.selected.isEmpty)
                 
                 Button("Unmark Translate Later") {
-                    appModel.markTranslateLater(value: false)
+                    for document in appModel.documents {
+                        document.markTranslateLater(value: false)
+                    }
                 }
                 .keyboardShortcut("l", modifiers: [.shift, .command]) // Cmd + Shift + L
                 .disabled(appModel.selected.isEmpty)
                 
                 Button("Mark for Needs Work") {
-                    appModel.markNeedsWork(value: true)
+                    for document in appModel.documents {
+                        document.markNeedsWork(value: true)
+                    }
                 }
                 .keyboardShortcut("w", modifiers: [.control, .command]) // Cmd + Control + W
                 .disabled(appModel.selected.isEmpty)
 
                 Button("Mark for Needs Work for All Languages") {
-                    appModel.markNeedsWork(value: true, allLanguages: true)
+                    for document in appModel.documents {
+                        document.markNeedsWork(value: true, allLanguages: true)
+                    }
                 }
                 .disabled(appModel.selected.isEmpty)
                 .keyboardShortcut("w", modifiers: [.control, .option, .command]) // Cmd + Option + Control + W
                 
                 Button("Clear Needs Work for All Languages") {
-                    appModel.clearNeedsWork(allLanguages: true)
+                    for document in appModel.documents {
+                        document.clearNeedsWork(allLanguages: true)
+                    }
                 }
 
                 Button("Unmark Needs Work") {
-                    appModel.markNeedsWork(value: false)
+                    for document in appModel.documents {
+                        document.markNeedsWork(value: false)
+                    }
                 }
                 .keyboardShortcut("w", modifiers: [.control, .shift, .command]) // Cmd + Shift + Control + W
                 .disabled(appModel.selected.isEmpty)
@@ -200,7 +239,9 @@ struct XCStringEditorApp: App {
                 
                 Button("Auto Translate") {
                     Task {
-                        await appModel.translate()
+                        for document in appModel.documents {
+                            await document.translate()
+                        }
                     }
                 }
                 .keyboardShortcut("t", modifiers: [.command, .option]) // Cmd + Option + T
@@ -208,14 +249,18 @@ struct XCStringEditorApp: App {
 
                 Button("Reverse Translate") {
                     Task {
-                        await appModel.reverseTranslate()
+                        for document in appModel.documents {
+                            await document.reverseTranslate()
+                        }
                     }
                 }
                 .keyboardShortcut("t", modifiers: [.shift, .option, .command]) // Cmd + Option + Shift + T
                 .disabled(appModel.selected.isEmpty)
 
                 Button("Check Translation") {
-                    appModel.detectLanguage()
+                    for document in appModel.documents {
+                        document.detectLanguage()
+                    }
                 }
                 .disabled(true) //stringsModel.selected.isEmpty)
             }
@@ -279,11 +324,6 @@ extension XCStringEditorApp {
     }
 
     private func openURL(_ url: URL) {
-        if appModel.isModified == false {
-            appModel.load(file: url)
-        } else {
-            appModel.openingFileURL = url
-            isDiscardConfirmVisible = true
-        }
+        appModel.load(file: url)
     }
 }

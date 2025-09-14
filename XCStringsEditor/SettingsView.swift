@@ -43,7 +43,9 @@ struct SettingsView: View {
         .padding()
         .frame(width: 500, height: 250)
         .onChange(of: translateService) { oldValue, newValue in
-            appModel.translator = TranslatorFactory.translator
+            for document in appModel.documents {
+                document.translator = TranslatorFactory.translator
+            }
         }
     }
 }

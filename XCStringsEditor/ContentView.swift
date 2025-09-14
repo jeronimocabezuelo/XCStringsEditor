@@ -12,7 +12,7 @@ import OSLog
 fileprivate let logger = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "ContentView")
 
 struct ActivityIndicatorModifier: ViewModifier {
-    @Binding var isPresented: Bool
+    var isPresented: Bool
     
     func body(content: Content) -> some View {
         ZStack {
@@ -51,79 +51,11 @@ struct ContentView: View {
         @Bindable var appModel = appModel
 
         NavigationStack {
-            Table(selection: $appModel.selected, sortOrder: $appModel.sortOrder) {
-                // Key
-                TableColumn("Key", value: \.key) { item in
-                    keyColumnView(item: item)
-                }
-                
-
-                // Source
-                TableColumn("Default Localization (\(appModel.baseLanguage.code))") { item in
-                    sourceColumnView(item: item)
-                }
-
-                // Translation
-                TableColumn(appModel.currentLanguage.localizedName) { item in
-                    ZStack {
-                        Text(verbatim: item.translation ?? item.sourceString)
-                            .foregroundStyle(item.translation == nil ? .secondary.opacity(0.5) : (item.needsWork ? Color.orange : .primary))
-                            .opacity(isEditing && item.id == appModel.editingID ? 0.0 : 1.0)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .lineLimit(nil)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .contentShape(Rectangle())
-                            .allowsHitTesting(item.children == nil)
-                            .onTapGesture {
-                                onTapTranslation(item: item)
-                            }
-                        
-                        if isEditing && appModel.editingID == item.id {
-                            // Editing TextField
-                            TextField(item.sourceString, text: $translation, axis: .vertical)
-                                .lineLimit(nil)
-                                .focused($focusedField, equals: .translation)
-                                .onSubmit {
-                                    focusedField = .table
-                                }
-                                .onAppear {
-                                    logger.debug("textfield appear")
-                                    
-                                    self.translation = item.translation ?? ""
-                                    DispatchQueue.main.async {
-                                        focusedField = .translation
-                                    }
-                                }
-                        }
-                    }
-                }
-                
-                // Reverse Translation
-                TableColumn("Reverse Translation") { item in
-                    reverseTranslationColumnView(item: item)
-                }
-                
-                // Comment
-                TableColumn("Comment") { item in
-                    commentColumnView(comment: item.comment ?? "")
-                }
-                // State
-                TableColumn("State", value: \.state) { item in
-                    ItemStateView(state: item.state)
-                }
-                .width(80)
-                .alignment(.center)
-                
-            } rows: {
-                OutlineGroup(appModel.localizeItems, children: \.children) { item in
-                    TableRow(item)
-                        .contextMenu { rowContextMenu(for: item) }
-                }
+            VStack {
+                tables(appModel: appModel)
             }
-            .focused($focusedField, equals: .table)
             .searchable(text: $appModel.searchText)
-            .navigationTitle(appModel.title ?? "XCStringsEditor")
+            .navigationTitle(appModel.documents.first?.title ?? "XCStringsEditor")
             .onAppear {
                 startMonitorKeyboardEvent()
                 
@@ -249,7 +181,7 @@ struct ContentView: View {
             }
             
         } // NavigationStack
-        .modifier(ActivityIndicatorModifier(isPresented: $appModel.isLoading))
+        .modifier(ActivityIndicatorModifier(isPresented: appModel.isLoading))
     }
     
     private func endEditing(updateTranslation: Bool = true) {
@@ -258,7 +190,9 @@ struct ContentView: View {
 #endif
         // update editing item
         if let editingID = appModel.editingID, updateTranslation == true {
-            appModel.updateTranslation(for: editingID, with: translation)
+            for document in appModel.documents {
+                document.updateTranslation(for: editingID, with: translation)
+            }
         }
         
         appModel.editingID = nil
@@ -333,49 +267,69 @@ struct ContentView: View {
 
         Button("Auto Translate") {
             Task {
-                await appModel.translate(ids: itemIDs)
+                for document in appModel.documents {
+                    await document.translate(ids: itemIDs)
+                }
             }
         }
         Button("Reverse Translate") {
             Task {
-                await appModel.reverseTranslate(ids: itemIDs)
+                for document in appModel.documents {
+                    await document.reverseTranslate(ids: itemIDs)
+                }
             }
         }
 
         Divider()
 
         Button("Mark for Review") {
-            appModel.markNeedsReview(ids: itemIDs)
+            for document in appModel.documents {
+                document.markNeedsReview(ids: itemIDs)
+            }
         }
         Button("Mark as Reviewed") {
-            appModel.reviewed(ids: itemIDs)
+            for document in appModel.documents {
+                document.reviewed(ids: itemIDs)
+            }
         }
 
         Divider()
         
-        if appModel.items(with: Array(itemIDs)).allSatisfy({ $0.shouldTranslate == false }) {
+        if appModel.documents.flatMap({$0.items(with: Array(itemIDs))}).allSatisfy({ $0.shouldTranslate == false }) {
             Button("Mark for Translation") {
-                appModel.setShouldTranslate(true, for: itemIDs)
+                for document in appModel.documents {
+                    document.setShouldTranslate(true, for: itemIDs)
+                }
             }
         } else {
             Button("Mark as \"Don't Translate\"") {
-                appModel.setShouldTranslate(false, for: itemIDs)
+                for document in appModel.documents {
+                    document.setShouldTranslate(false, for: itemIDs)
+                }
             }
         }
 
         Divider()
         
         Button("Mark for Translate Later") {
-            appModel.markTranslateLater(ids: itemIDs, value: true)
+            for document in appModel.documents {
+                document.markTranslateLater(ids: itemIDs, value: true)
+            }
         }
         Button("Unmark Translate Later") {
-            appModel.markTranslateLater(ids: itemIDs, value: false)
+            for document in appModel.documents {
+                document.markTranslateLater(ids: itemIDs, value: false)
+            }
         }
         Button("Mark for Needs Work") {
-            appModel.markNeedsWork(ids: itemIDs, value: true)
+            for document in appModel.documents {
+                document.markNeedsWork(ids: itemIDs, value: true)
+            }
         }
         Button("Unmark Needs Work") {
-            appModel.markNeedsWork(ids: itemIDs, value: false)
+            for document in appModel.documents {
+                document.markNeedsWork(ids: itemIDs, value: false)
+            }
         }
     }
     
@@ -411,8 +365,9 @@ struct ContentView: View {
 //            print(item)
 //        }
 //        #endif
-
-        appModel.save()
+        for document in appModel.documents {
+            document.save()
+        }
     }
     
     private func contextMenuItemIDs(itemID: LocalizeItem.ID) -> Set<LocalizeItem.ID> {
@@ -462,6 +417,89 @@ struct ContentView: View {
     
     private func isReverseTranslationMatch(_ item: LocalizeItem) -> Bool {
         return item.reverseTranslation?.uppercased() == item.sourceString.uppercased()
+    }
+    
+    @ViewBuilder
+    func tables(appModel: AppModel) -> some View {
+        ForEach(appModel.documents) { document in
+            table(appModel: appModel, document: document)
+        }
+    }
+    
+    @ViewBuilder
+    func table(appModel: AppModel, document: DocumentModel) -> some View {
+        @Bindable var appModel = appModel
+        Table(selection: $appModel.selected, sortOrder: $appModel.sortOrder) {
+            // Key
+            TableColumn("Key", value: \.key) { item in
+                keyColumnView(item: item)
+            }
+            
+            
+            // Source
+            TableColumn("Default Localization (\(appModel.documents.first?.baseLanguage.code))") { item in
+                sourceColumnView(item: item)
+            }
+            
+            // Translation
+            TableColumn(appModel.currentLanguage.localizedName) { item in
+                ZStack {
+                    Text(verbatim: item.translation ?? item.sourceString)
+                        .foregroundStyle(item.translation == nil ? .secondary.opacity(0.5) : (item.needsWork ? Color.orange : .primary))
+                        .opacity(isEditing && item.id == appModel.editingID ? 0.0 : 1.0)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .contentShape(Rectangle())
+                        .allowsHitTesting(item.children == nil)
+                        .onTapGesture {
+                            onTapTranslation(item: item)
+                        }
+                    
+                    if isEditing && appModel.editingID == item.id {
+                        // Editing TextField
+                        TextField(item.sourceString, text: $translation, axis: .vertical)
+                            .lineLimit(nil)
+                            .focused($focusedField, equals: .translation)
+                            .onSubmit {
+                                focusedField = .table
+                            }
+                            .onAppear {
+                                logger.debug("textfield appear")
+                                
+                                self.translation = item.translation ?? ""
+                                DispatchQueue.main.async {
+                                    focusedField = .translation
+                                }
+                            }
+                    }
+                }
+            }
+            
+            // Reverse Translation
+            TableColumn("Reverse Translation") { item in
+                reverseTranslationColumnView(item: item)
+            }
+            
+            // Comment
+            TableColumn("Comment") { item in
+                commentColumnView(comment: item.comment ?? "")
+            }
+            // State
+            TableColumn("State", value: \.state) { item in
+                ItemStateView(state: item.state)
+            }
+            .width(80)
+            .alignment(.center)
+            
+        } rows: {
+            OutlineGroup(document.localizeItems, children: \.children) { item in
+                TableRow(item)
+                    .contextMenu { rowContextMenu(for: item) }
+            }
+        }
+        .focused($focusedField, equals: .table)
     }
 }
 
