@@ -153,6 +153,24 @@ struct LocalizeItem: Identifiable, Hashable, CustomStringConvertible {
         self.children = children
     }
     
+    init(document: DocumentModel) {
+        self.init(
+            id: document.id.debugDescription,
+            key: document.title ?? "Unnamed Document",
+            sourceString: "",
+            language: document.baseLanguage,
+            needsReview: false,
+            children: document.localizeItems
+        )
+    }
+    
+    func wiht(children: [LocalizeItem]) -> Self {
+        var result = self
+        result.children = children
+        
+        return result
+    }
+    
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
@@ -192,6 +210,9 @@ struct LocalizeItem: Identifiable, Hashable, CustomStringConvertible {
     /// - Returns: The base ID.
     static func baseID(_ id: LocalizeItem.ID) -> LocalizeItem.ID {
         let components = id.components(separatedBy: LocalizeItem.ID_DIVIDER)
+        guard components.count > 2 else {
+            return ""
+        }
         let key = components[0]
         let subcomponents = components[1].components(separatedBy: "/")
         let langCode = subcomponents[0]

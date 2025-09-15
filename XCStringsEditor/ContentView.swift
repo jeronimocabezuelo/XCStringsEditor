@@ -39,7 +39,7 @@ struct ContentView: View {
     @State private var nextEditingItem: LocalizeItem?
     @FocusState private var focusedField: Field?
     @State private var showConfirmClose: Bool = false
-    
+    @State private var collapsedNodes: Set<LocalizeItem.ID> = []
     
 //    init() {
 //        #if DEBUG
@@ -49,13 +49,92 @@ struct ContentView: View {
         
     var body: some View {
         @Bindable var appModel = appModel
-
+        
         NavigationStack {
-            VStack {
-                tables(appModel: appModel)
+            Table(selection: $appModel.selected, sortOrder: $appModel.sortOrder) {
+                // Key
+                TableColumn("Key", value: \.key) { item in
+                    keyColumnView(item: item)
+                }
+                
+                // Source
+                TableColumn("Default Localization (\(appModel.documents.first?.baseLanguage.code ?? ""))") { item in
+                    sourceColumnView(item: item)
+                }
+                
+                // Translation
+                TableColumn(appModel.currentLanguage.localizedName) { item in
+                    ZStack {
+                        Text(verbatim: item.translation ?? item.sourceString)
+                            .foregroundStyle(item.translation == nil ? .secondary.opacity(0.5) : (item.needsWork ? Color.orange : .primary))
+                            .opacity(isEditing && item.id == appModel.editingID ? 0.0 : 1.0)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .contentShape(Rectangle())
+                            .allowsHitTesting(item.children == nil)
+                            .onTapGesture {
+                                onTapTranslation(item: item)
+                            }
+                        
+                        if isEditing && appModel.editingID == item.id {
+                            // Editing TextField
+                            TextField(item.sourceString, text: $translation, axis: .vertical)
+                                .lineLimit(nil)
+                                .focused($focusedField, equals: .translation)
+                                .onSubmit {
+                                    focusedField = .table
+                                }
+                                .onAppear {
+                                    logger.debug("textfield appear")
+                                    
+                                    self.translation = item.translation ?? ""
+                                    DispatchQueue.main.async {
+                                        focusedField = .translation
+                                    }
+                                }
+                        }
+                    }
+                }
+                
+                // Reverse Translation
+                TableColumn("Reverse Translation") { item in
+                    reverseTranslationColumnView(item: item)
+                }
+                
+                // Comment
+                TableColumn("Comment") { item in
+                    commentColumnView(comment: item.comment ?? "")
+                }
+                // State
+                TableColumn("State", value: \.state) { item in
+                    ItemStateView(state: item.state)
+                }
+                .width(80)
+                .alignment(.center)
+            } rows: {
+                ForEach(appModel.documents) { document in
+//                    OutlineGroup(document.item, children: \.children) { item in
+//                        TableRow(item)
+//                            .contextMenu { rowContextMenu(for: item) }
+//                    }
+                    
+                    // Simulated header with TableRow for each document.
+                    // Used this way because a simple OutlineGroup always appears initially collapsed.
+                    
+                    TableRow(document.item)
+                    if !collapsedNodes.contains(document.item.id) {
+                        OutlineGroup(document.localizeItems, children: \.children) { item in
+                            TableRow(item)
+                                .contextMenu { rowContextMenu(for: item) }
+                        }
+                    }
+                }
             }
+            .focused($focusedField, equals: .table)
             .searchable(text: $appModel.searchText)
-            .navigationTitle(appModel.documents.first?.title ?? "XCStringsEditor")
+            .navigationTitle(appModel.title)
             .onAppear {
                 startMonitorKeyboardEvent()
                 
@@ -75,7 +154,7 @@ struct ContentView: View {
                             .frame(width: 6, height: 6)
                     }
                 }
-                    
+                
                 if appModel.languages.isEmpty == false {
                     ToolbarItemGroup(placement: .primaryAction) {
                         Spacer()
@@ -142,7 +221,6 @@ struct ContentView: View {
                         .menuIndicator(.hidden)
                     }
                 }
-                    
             }
             .toolbarRole(.editor)
             .onChange(of: appModel.sortOrder, { oldValue, newValue in
@@ -151,7 +229,7 @@ struct ContentView: View {
             .onChange(of: focusedField) { oldValue, newValue in
                 if oldValue == .translation && newValue != .translation {
                     logger.debug("textfield focusout")
-
+                    
                     let oldSelected = appModel.selected
                     endEditing()
                     
@@ -169,7 +247,7 @@ struct ContentView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text("API Key must be set in settings to use this function.")
-            }            
+            }
             .alert("Confirm Close", isPresented: $showConfirmClose) {
                 Button("Cancel", role: .cancel) {}
                 Button("Discard Changes", role: .destructive) {
@@ -213,6 +291,14 @@ struct ContentView: View {
     
     private func keyColumnView(item: LocalizeItem) -> some View {
         HStack {
+            if let children = item.children, !children.isEmpty {
+                // Chevron reflecting expanded/collapsed state
+                Image(systemName: collapsedNodes.contains(item.id) ? "chevron.right" : "chevron.down")
+                    .onTapGesture {
+                        toggleCollapsed(item.id)
+                    }
+                    .foregroundStyle(.secondary)
+            }
             Circle()
                 .fill(.blue)
                 .frame(width: 6, height: 6)
@@ -260,11 +346,11 @@ struct ContentView: View {
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
     }
-
+    
     @ViewBuilder
     private func rowContextMenu(for item: LocalizeItem) -> some View {
         let itemIDs = contextMenuItemIDs(itemID: item.id)
-
+        
         Button("Auto Translate") {
             Task {
                 for document in appModel.documents {
@@ -279,9 +365,9 @@ struct ContentView: View {
                 }
             }
         }
-
+        
         Divider()
-
+        
         Button("Mark for Review") {
             for document in appModel.documents {
                 document.markNeedsReview(ids: itemIDs)
@@ -292,7 +378,7 @@ struct ContentView: View {
                 document.reviewed(ids: itemIDs)
             }
         }
-
+        
         Divider()
         
         if appModel.documents.flatMap({$0.items(with: Array(itemIDs))}).allSatisfy({ $0.shouldTranslate == false }) {
@@ -308,7 +394,7 @@ struct ContentView: View {
                 }
             }
         }
-
+        
         Divider()
         
         Button("Mark for Translate Later") {
@@ -419,87 +505,12 @@ struct ContentView: View {
         return item.reverseTranslation?.uppercased() == item.sourceString.uppercased()
     }
     
-    @ViewBuilder
-    func tables(appModel: AppModel) -> some View {
-        ForEach(appModel.documents) { document in
-            table(appModel: appModel, document: document)
+    private func toggleCollapsed(_ id: LocalizeItem.ID) {
+        if collapsedNodes.contains(id) {
+            collapsedNodes.remove(id)
+        } else {
+            collapsedNodes.insert(id)
         }
-    }
-    
-    @ViewBuilder
-    func table(appModel: AppModel, document: DocumentModel) -> some View {
-        @Bindable var appModel = appModel
-        Table(selection: $appModel.selected, sortOrder: $appModel.sortOrder) {
-            // Key
-            TableColumn("Key", value: \.key) { item in
-                keyColumnView(item: item)
-            }
-            
-            
-            // Source
-            TableColumn("Default Localization (\(appModel.documents.first?.baseLanguage.code))") { item in
-                sourceColumnView(item: item)
-            }
-            
-            // Translation
-            TableColumn(appModel.currentLanguage.localizedName) { item in
-                ZStack {
-                    Text(verbatim: item.translation ?? item.sourceString)
-                        .foregroundStyle(item.translation == nil ? .secondary.opacity(0.5) : (item.needsWork ? Color.orange : .primary))
-                        .opacity(isEditing && item.id == appModel.editingID ? 0.0 : 1.0)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .lineLimit(nil)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .contentShape(Rectangle())
-                        .allowsHitTesting(item.children == nil)
-                        .onTapGesture {
-                            onTapTranslation(item: item)
-                        }
-                    
-                    if isEditing && appModel.editingID == item.id {
-                        // Editing TextField
-                        TextField(item.sourceString, text: $translation, axis: .vertical)
-                            .lineLimit(nil)
-                            .focused($focusedField, equals: .translation)
-                            .onSubmit {
-                                focusedField = .table
-                            }
-                            .onAppear {
-                                logger.debug("textfield appear")
-                                
-                                self.translation = item.translation ?? ""
-                                DispatchQueue.main.async {
-                                    focusedField = .translation
-                                }
-                            }
-                    }
-                }
-            }
-            
-            // Reverse Translation
-            TableColumn("Reverse Translation") { item in
-                reverseTranslationColumnView(item: item)
-            }
-            
-            // Comment
-            TableColumn("Comment") { item in
-                commentColumnView(comment: item.comment ?? "")
-            }
-            // State
-            TableColumn("State", value: \.state) { item in
-                ItemStateView(state: item.state)
-            }
-            .width(80)
-            .alignment(.center)
-            
-        } rows: {
-            OutlineGroup(document.localizeItems, children: \.children) { item in
-                TableRow(item)
-                    .contextMenu { rowContextMenu(for: item) }
-            }
-        }
-        .focused($focusedField, equals: .table)
     }
 }
 

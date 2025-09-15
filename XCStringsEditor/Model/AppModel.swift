@@ -40,6 +40,10 @@ struct Filter {
 
 @Observable
 class AppModel {
+    var title: String {
+        documents.count == 1 ? documents.first?.title ?? "" : "XCStringEditor"
+    }
+    
     var currentLanguage: Language = .english {
         didSet {
             selected.removeAll()
@@ -189,13 +193,16 @@ class DocumentModel: Identifiable {
         appModel.filter
     }
     
+    var item: LocalizeItem {
+        .init(document: self)
+    }
+    
     var settings: FileSettings!
     
     var isLoading: Bool = false
     var translator = TranslatorFactory.translator
     init(appModel: AppModel) {
         self.appModel = appModel
-        
         
 //        searchText.publisher
 //            .debounce(for: 0.2, scheduler: RunLoop.main)
