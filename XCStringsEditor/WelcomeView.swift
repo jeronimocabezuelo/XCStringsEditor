@@ -53,13 +53,6 @@ struct WelcomeView: View {
                                 dismissWindow()
                                 
                                 appModel.load(file: url)
-                                
-                                var recents = UserDefaults.standard.array(forKey: "RecentFiles") as? [String] ?? [String]()
-                                if let index = recents.firstIndex(where: { $0 == url.path(percentEncoded: false) }) {
-                                    recents.remove(at: index)
-                                    recents.append(url.path(percentEncoded: false))
-                                    UserDefaults.standard.set(recents, forKey: "RecentFiles")
-                                }
                             } label: {
                                 HStack {
                                     Image(nsImage: NSWorkspace.shared.icon(forFile: url.path(percentEncoded: false)))

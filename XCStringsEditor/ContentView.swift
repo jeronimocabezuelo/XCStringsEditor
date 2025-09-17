@@ -64,38 +64,7 @@ struct ContentView: View {
                 
                 // Translation
                 TableColumn(appModel.currentLanguage.localizedName) { item in
-                    ZStack {
-                        Text(verbatim: item.translation ?? item.sourceString)
-                            .foregroundStyle(item.translation == nil ? .secondary.opacity(0.5) : (item.needsWork ? Color.orange : .primary))
-                            .opacity(isEditing && item.id == appModel.editingID ? 0.0 : 1.0)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .lineLimit(nil)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .contentShape(Rectangle())
-                            .allowsHitTesting(item.children == nil)
-                            .onTapGesture {
-                                onTapTranslation(item: item)
-                            }
-                        
-                        if isEditing && appModel.editingID == item.id {
-                            // Editing TextField
-                            TextField(item.sourceString, text: $translation, axis: .vertical)
-                                .lineLimit(nil)
-                                .focused($focusedField, equals: .translation)
-                                .onSubmit {
-                                    focusedField = .table
-                                }
-                                .onAppear {
-                                    logger.debug("textfield appear")
-                                    
-                                    self.translation = item.translation ?? ""
-                                    DispatchQueue.main.async {
-                                        focusedField = .translation
-                                    }
-                                }
-                        }
-                    }
+                    currentColumnView(item: item)
                 }
                 
                 // Reverse Translation
@@ -318,6 +287,43 @@ struct ContentView: View {
             .fixedSize(horizontal: false, vertical: true)
             .foregroundStyle(item.translateLater || item.shouldTranslate == false ? .secondary : .primary)
     }
+    
+    @ViewBuilder
+    private func currentColumnView(item: LocalizeItem) -> some View {
+        ZStack {
+            Text(verbatim: item.translation ?? item.sourceString)
+                .foregroundStyle(item.translation == nil ? .secondary.opacity(0.5) : (item.needsWork ? Color.orange : .primary))
+                .opacity(isEditing && item.id == appModel.editingID ? 0.0 : 1.0)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(nil)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentShape(Rectangle())
+                .allowsHitTesting(item.children == nil)
+                .onTapGesture {
+                    onTapTranslation(item: item)
+                }
+            
+            if isEditing && appModel.editingID == item.id {
+                // Editing TextField
+                TextField(item.sourceString, text: $translation, axis: .vertical)
+                    .lineLimit(nil)
+                    .focused($focusedField, equals: .translation)
+                    .onSubmit {
+                        focusedField = .table
+                    }
+                    .onAppear {
+                        logger.debug("textfield appear")
+                        
+                        self.translation = item.translation ?? ""
+                        DispatchQueue.main.async {
+                            focusedField = .translation
+                        }
+                    }
+            }
+        }
+    }
+    
     
     @ViewBuilder
     private func reverseTranslationColumnView(item: LocalizeItem) -> some View {

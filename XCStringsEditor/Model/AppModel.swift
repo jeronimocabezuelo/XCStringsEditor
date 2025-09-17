@@ -122,11 +122,119 @@ class AppModel {
         }
     }
     
-    
-    
     func load(file: URL) {
+        do {
+            try loadFile(at: file)
+        } catch {
+            print("Failed to load file: \(error)")
+        }
+    }
+    
+    func loadFile(at file: URL) throws {
+        let ext = file.pathExtension.lowercased()
+        
+        switch ext {
+        case "xcstrings":
+            try loadXCString(of: file)
+            
+            addToRecent(file: file)
+        case "xcodeproj":
+            // Buscar todos los .xcstrings dentro del proyecto o workspace
+            for xcstringUrl in xcstringsInProject(file) {
+                try loadXCString(of: xcstringUrl)
+            }
+            
+            addToRecent(file: file)
+        default:
+            print("Unsupported file type: \(ext)")
+        }
+    }
+    
+    func addToRecent(file: URL) {
+        // Update recent files
+        var recents = UserDefaults.standard.array(forKey: "RecentFiles") as? [String] ?? [String]()
+        if let index = recents.firstIndex(where: { $0 == file.path(percentEncoded: false) }) {
+            recents.remove(at: index)
+        }
+        recents.append(file.path(percentEncoded: false))
+        if recents.count > 15 {
+            recents.removeFirst(recents.count - 15)
+        }
+        UserDefaults.standard.set(recents, forKey: "RecentFiles")
+    }
+    
+    func xcstringsInProject(_ xcodeproj: URL) -> [URL] {
+        let projectFile = xcodeproj.appendingPathComponent("project.pbxproj")
+        guard let content = try? String(contentsOf: projectFile) else {
+            print("No se pudo leer project.pbxproj")
+            return []
+        }
+
+        let pattern = #"path = (.+\.xcstrings);"#
+        let regex = try? NSRegularExpression(pattern: pattern, options: [])
+
+        let nsrange = NSRange(content.startIndex..<content.endIndex, in: content)
+        let matches = regex?.matches(in: content, options: [], range: nsrange) ?? []
+
+        var results = [URL]()
+        for match in matches {
+            if let range = Range(match.range(at: 1), in: content) {
+                let xcString = content[range].trimmingCharacters(in: .whitespacesAndNewlines)
+
+                let projectRoot = xcodeproj.deletingLastPathComponent()
+                // Construimos la URL estándar
+                if let fileURL = findFileRecursively(named: xcString, in: projectRoot) {
+                    results.append(fileURL)
+                    print("Resultado: \(fileURL)")
+                } else {
+                    print("No se encontró el archivo \(xcString) para path: \(projectRoot)")
+                }
+            }
+        }
+
+        return results
+    }
+
+    // Helper para búsqueda recursiva
+    private func findFileRecursively(named: String, in directory: URL) -> URL? {
+        let fm = FileManager.default
+        if let enumerator = fm.enumerator(at: directory, includingPropertiesForKeys: nil) {
+            for case let file as URL in enumerator {
+                if file.lastPathComponent == named {
+                    return file
+                }
+            }
+        }
+        return nil
+    }
+    
+    private func findXCStrings(in directory: URL) -> [URL] {
+        var results = [URL]()
+        
+        func scan(url: URL) {
+            guard let contents = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else {
+                return
+            }
+            
+            for item in contents {
+                if item.pathExtension.lowercased() == "xcstrings" {
+                    results.append(item)
+                } else {
+                    var isDirectory: ObjCBool = false
+                    if FileManager.default.fileExists(atPath: item.path, isDirectory: &isDirectory), isDirectory.boolValue {
+                        scan(url: item)
+                    }
+                }
+            }
+        }
+        
+        scan(url: directory)
+        return results
+    }
+    
+    func loadXCString(of file: URL) throws {
         let document = DocumentModel(appModel: self)
-        document.load(file: file)
+        try document.load(file: file)
         document.currentLanguage = currentLanguage
         
         documents.append(document)
@@ -221,56 +329,39 @@ class DocumentModel: Identifiable {
 //            .store(in: &cancellables)
     }
     
-    func load(file: URL) {
-        do {
-            let data = try Data(contentsOf: file)
-            let xcstrings = try JSONDecoder().decode(XCStrings.self, from: data)
-            
-            print(xcstrings.version, xcstrings.sourceLanguage)
-            print("string count", xcstrings.strings.count)
-
-            // xcstrings.printStrings()
-
-            self.baseLanguage = xcstrings.sourceLanguage
-            self.xcstrings = xcstrings
-            self.languages = languages(in: xcstrings).sorted(using: KeyPathComparator<Language>(\.localizedName, order: .forward))
-
-            self.fileURL = file
-            if let projectName = self.projectName(for: file) {
-                self.title = "\(projectName)/\(file.deletingPathExtension().lastPathComponent)"
-            } else {
-                self.title = file.deletingPathExtension().lastPathComponent
-            }
-            self.settings = loadSettings()
-
-            print("settings file", settingsFileURL!.standardizedFileURL)
-            print("settings translatelater", settings.translateLater.count)
-            
-            self.allLocalizeItems = xcStringsToLocalizeItems(xcstrings: xcstrings, languages: self.languages)
-
-            // Setting currentLanguage triggers reloadData
-            self.currentLanguage = if let lastLanguage = Language(code: settings.lastLanguage), self.languages.contains(lastLanguage) {
-                lastLanguage
-            } else {
-                self.languages.first!
-            }
-            isModified = false
-            
-            
-            // Update recent files
-            var recents = UserDefaults.standard.array(forKey: "RecentFiles") as? [String] ?? [String]()
-            if let index = recents.firstIndex(where: { $0 == file.path(percentEncoded: false) }) {
-                recents.remove(at: index)
-            }
-            recents.append(file.path(percentEncoded: false))
-            if recents.count > 15 {
-                recents.removeFirst(recents.count - 15)
-            }
-            UserDefaults.standard.set(recents, forKey: "RecentFiles")
-
-        } catch {
-            print("Failed to load", error)
+    func load(file: URL) throws {
+        let data = try Data(contentsOf: file)
+        let xcstrings = try JSONDecoder().decode(XCStrings.self, from: data)
+        
+        print(xcstrings.version, xcstrings.sourceLanguage)
+        print("string count", xcstrings.strings.count)
+        
+        // xcstrings.printStrings()
+        
+        self.baseLanguage = xcstrings.sourceLanguage
+        self.xcstrings = xcstrings
+        self.languages = languages(in: xcstrings).sorted(using: KeyPathComparator<Language>(\.localizedName, order: .forward))
+        
+        self.fileURL = file
+        if let projectName = self.projectName(for: file) {
+            self.title = "\(projectName)/\(file.deletingPathExtension().lastPathComponent)"
+        } else {
+            self.title = file.deletingPathExtension().lastPathComponent
         }
+        self.settings = loadSettings()
+        
+        print("settings file", settingsFileURL!.standardizedFileURL)
+        print("settings translatelater", settings.translateLater.count)
+        
+        self.allLocalizeItems = xcStringsToLocalizeItems(xcstrings: xcstrings, languages: self.languages)
+        
+        // Setting currentLanguage triggers reloadData
+        self.currentLanguage = if let lastLanguage = Language(code: settings.lastLanguage), self.languages.contains(lastLanguage) {
+            lastLanguage
+        } else {
+            self.languages.first!
+        }
+        isModified = false
     }
     
     func projectName(for url: URL) -> String? {
@@ -1368,3 +1459,4 @@ class DocumentModel: Identifiable {
     }
     
 }
+

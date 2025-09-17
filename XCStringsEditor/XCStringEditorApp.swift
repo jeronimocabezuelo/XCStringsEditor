@@ -15,6 +15,7 @@ extension Notification.Name {
 struct XCStringEditorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @Environment(\.controlActiveState) private var controlActiveState
+    @Environment(\.openWindow) private var openWindow
     
     @State private var appModel: AppModel = AppModel()
     @State private var isDiscardConfirmVisible: Bool = false
@@ -49,7 +50,7 @@ struct XCStringEditorApp: App {
                                 return
                             }
                             document.save()
-                            document.load(file: url)
+                            try? document.load(file: url)
                         }
                     }
                     
@@ -58,7 +59,7 @@ struct XCStringEditorApp: App {
                             guard let url = document.openingFileURL else {
                                 return
                             }
-                            document.load(file: url)
+                            try? document.load(file: url)
                         }
                     }
                     
@@ -83,13 +84,6 @@ struct XCStringEditorApp: App {
                         ForEach(recents.reversed(), id: \.self) { url in
                             Button {
                                 appModel.load(file: url)
-                                
-                                var recents = UserDefaults.standard.array(forKey: "RecentFiles") as? [String] ?? [String]()
-                                if let index = recents.firstIndex(where: { $0 == url.path(percentEncoded: false) }) {
-                                    recents.remove(at: index)
-                                    recents.append(url.path(percentEncoded: false))
-                                    UserDefaults.standard.set(recents, forKey: "RecentFiles")
-                                }
                             } label: {
                                 HStack {
                                     Image(nsImage: NSWorkspace.shared.icon(forFile: url.path(percentEncoded: false)))
@@ -325,5 +319,7 @@ extension XCStringEditorApp {
 
     private func openURL(_ url: URL) {
         appModel.load(file: url)
+        
+        openWindow(id: "main")
     }
 }
